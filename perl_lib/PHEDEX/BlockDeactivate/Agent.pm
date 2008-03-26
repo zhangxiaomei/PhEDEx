@@ -20,7 +20,7 @@ L<PHEDEX::Core::Agent|PHEDEX::Core::Agent>
 
 use strict;
 use warnings;
-use base 'PHEDEX::Core::POEAgent', 'PHEDEX::BlockDeactivate::SQL';
+use base 'PHEDEX::Core::Agent', 'PHEDEX::BlockDeactivate::SQL';
 use PHEDEX::Core::Timing qw / mytimeofday /;
 
 our %params =
@@ -130,7 +130,7 @@ sub idle
 	      $nfr = $self->nExpectedDeletions( BLOCK => $id );
 	      if (! $nfr)
 	      {
-		  $self->Alert ("refusing to deactivate block $name with no files");
+		  &alert ("refusing to deactivate block $name with no files");
 		  $self->setBlockOpen( BLOCK => $id );
 		  $dbh->commit();
 	      }
@@ -140,28 +140,28 @@ sub idle
 		  my $nr = $self->deactivateReplicas( BLOCK => $id );   
 		  if ($nr != $nfr)
 		  {
-		      $self->Alert ("deactivating $name deleted $nr file replicas,"
+		      &alert ("deactivating $name deleted $nr file replicas,"
 			      . " expected to delete $nfr, undoing deactivation");
 		      $dbh->rollback();
 		  }
 		  else
 		  {
 		      my $nb = $self->setBlockInactive( BLOCK => $id );
-		      $self->Logmsg ("deactivated $name: $nr file replicas, $nb block replicas");
+		      &logmsg ("deactivated $name: $nr file replicas, $nb block replicas");
 		      $dbh->commit ();
 		  }
 	      }
 
 	      $self->maybeStop();
 	  };
-	  do { chomp ($@); $self->Alert ("database error: $@");
+	  do { chomp ($@); &alert ("database error: $@");
 	       eval { $dbh->rollback() } if $dbh } if $@;
       }
 
       # Disconnect from the database
       $self->disconnectAgent();
   };
-  do { chomp ($@); $self->Alert ("database error: $@");
+  do { chomp ($@); &alert ("database error: $@");
        eval { $dbh->rollback() } if $dbh } if $@;
 }
 

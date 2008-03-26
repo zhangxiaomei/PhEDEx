@@ -20,7 +20,7 @@ L<PHEDEX::Core::Agent|PHEDEX::Core::Agent>
 
 use strict;
 use warnings;
-use base 'PHEDEX::Core::POEAgent', 'PHEDEX::BlockActivate::SQL';
+use base 'PHEDEX::Core::Agent', 'PHEDEX::BlockActivate::SQL';
 use PHEDEX::Core::Logging;
 use PHEDEX::Core::Timing;
 
@@ -81,7 +81,7 @@ sub idle
 	    # Ignore active blocks
 	    if ($nactive)
 	    {
-		$self->Alert ("block $id ($block) has $nreplica replicas"
+		&alert ("block $id ($block) has $nreplica replicas"
 			. " of which only $nactive are active")
 		    if $nreplica != $nactive;
 	        next;
@@ -97,7 +97,7 @@ sub idle
 			  NACTIVE  => $nactive,
 			) )
 	    {
-		$self->Warn ("block $id ($block) changed, skipping activation");
+		&warn ("block $id ($block) changed, skipping activation");
 	        $dbh->rollback();
 		next;
 	    }
@@ -109,7 +109,7 @@ sub idle
 					  NOW => $now
 					);
 
-	    $self->Logmsg ("block $id ($block) reactivated with $nfile files"
+	    &logmsg ("block $id ($block) reactivated with $nfile files"
 		     . " and $nreplica replicas");
 	    $dbh->commit();
 	}
@@ -117,7 +117,7 @@ sub idle
 	# Remove old activation requests
         $self->removeOldActivationRequests( NOW => $now );
     };
-    do { chomp ($@); $self->Alert ("database error: $@");
+    do { chomp ($@); &alert ("database error: $@");
 	 eval { $dbh->rollback() } if $dbh } if $@;
 
     # Disconnect from the database

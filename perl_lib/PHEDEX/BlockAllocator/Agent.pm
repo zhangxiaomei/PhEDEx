@@ -20,7 +20,7 @@ L<PHEDEX::Core::Agent|PHEDEX::Core::Agent>
 
 use strict;
 use warnings;
-use base 'PHEDEX::Core::POEAgent', 'PHEDEX::BlockAllocator::Core';
+use base 'PHEDEX::Core::Agent', 'PHEDEX::BlockAllocator::Core';
 use PHEDEX::Core::Logging;
 use PHEDEX::Core::Timing;
 
@@ -82,7 +82,7 @@ sub idle
     if (grep $_->[1] != 0, @stats1, @stats2, @stats3) {
 	$self->printStats('allocation stats', @stats1, @stats2, @stats3);
     } else {
-	$self->Logmsg('nothing to do');
+	&logmsg('nothing to do');
     }
 };
     do { chomp ($@); &alert ("database error: $@");
