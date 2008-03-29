@@ -1,17 +1,7 @@
-package PHEDEX::Transfer::FTS; use base 'PHEDEX::Transfer::Core';
-use strict;
-use warnings;
-use Getopt::Long;
-use POSIX;
-use PHEDEX::Transfer::Backend::Job;
-use PHEDEX::Transfer::Backend::File;
-use PHEDEX::Transfer::Backend::Monitor;
-use PHEDEX::Transfer::Backend::Interface::Glite;
+package PHEDEX::Transfer::FTS; use strict; use warnings; use base 'PHEDEX::Transfer::Core';
 use PHEDEX::Core::Command;
-use PHEDEX::Core::Timing;
-use PHEDEX::Monalisa;
-use POE;
-
+use Getopt::Long;
+# DO NOT USE - UNFINISHED!!
 # Command back end defaulting to srmcp and supporting batch transfers.
 sub new
 {
@@ -23,403 +13,174 @@ sub new
     my $options = shift || {};
     my $params = shift || {};
 
-    # Set my defaults where not defined by the derived class.
-    $params->{PROTOCOLS} ||= [ 'srm' ];  # Accepted protocols
-    $params->{BATCH_FILES}    ||= 30;    # Max number of files per batch
-    $params->{FTS_LINK_PEND}  ||= 5;     # Submit to FTS until this number of files per link are "Pending"
-    $params->{FTS_MAX_ACTIVE} ||= 300;   # Submit to FTS until these number of files are "Active"
-    $params->{FTS_POLL_QUEUE} ||= 1;     # Whether to poll all vs. our jobs
-    $params->{FTS_Q_INTERVAL} ||= 30;    # Interval for polling queue for new jobs
-    $params->{FTS_J_INTERVAL} ||= 5;     # Interval for polling individual jobs
-
-    # Set argument parsing at this level.
-    $options->{'batch-files=i'} = \$params->{BATCH_FILES};
-    $options->{'link-pending-files=i'} = \$params->{FTS_LINK_PEND};
-    $options->{'max-active-files=i'}   = \$params->{FTS_MAX_ACTIVE};
-    $options->{'service=s'} = \$params->{FTS_SERVICE};
-    $options->{'mapfile=s'} = \$params->{FTS_MAPFILE};
-    $options->{'q_interval=i'} = \$params->{FTS_Q_INTERVAL};
-    $options->{'j_interval=i'} = \$params->{FTS_J_INTERVAL};
-    $options->{'poll_queue=i'} = \$params->{FTS_POLL_QUEUE};
-    $options->{'monalisa_host=s'} = \$params->{FTS_MONALISA_HOST};
-    $options->{'monalisa_port=i'} = \$params->{FTS_MONALISA_PORT};
-    $options->{'monalisa_cluster=s'} = \$params->{FTS_MONALISA_CLUSTER};
-    $options->{'monalisa_node=s'} = \$params->{FTS_MONALISA_NODE};
+	# Set my defaults where not defined by the derived class.
+	$$params{PROTOCOLS}   ||= [ 'srm' ];    # Accepted protocols
+	#$$params{COMMAND}     ||= [ 'srmcp' ]; # Transfer command
+	$$params{BATCH_FILES} ||= 25;           # Max number of files per batch
+	$$params{LINK_FILES}  ||= 250;          # Queue this number of files in FTS for a link 
+	
+	# Set argument parsing at this level.
+	$$options{'batch-files=i'} = \$$params{BATCH_FILES};
+	$$options{'link-files=i'} = \$$params{LINK_FILES};
 
     # Initialise myself
     my $self = $class->SUPER::new($master, $options, $params, @_);
     bless $self, $class;
-
-    $self->init();
-    use Data::Dumper;
-    print 'FTS $self:  ', Dumper($self), "\n" if $self->{DEBUG};
     return $self;
 }
 
-sub init
+# Transfer a batch of files.
+sub transferBatch
 {
-    my ($self) = @_;
+    my ($self, $job, $tasks) = @_;
 
-    my $glite = PHEDEX::Transfer::Backend::Interface::Glite->new
-	(
-	 SERVICE => $self->{FTS_SERVICE},
-	 ME      => 'GLite',
-	 );
+    # Prepare copyjob and report names.
+    my $spec = "$$job{DIR}/copyjob";
+    my $report = "$$job{DIR}/fts-report";
 
-    $self->{Q_INTERFACE} = $glite;
+    # Now generate copyjob
+    &output ($spec, join ("", map { "$$tasks{$_}{FROM_PFN} ".
+		                    "$$tasks{$_}{TO_PFN}\n" }
+		          keys %{$$job{TASKS}}));
 
-    print "Using service ",$glite->SERVICE,"\n"; # XXX
-
-    my $monalisa;
-    my $use_monalisa = 1;
-    foreach (qw(FTS_MONALISA_HOST FTS_MONALISA_PORT FTS_MONALISA_CLUSTER FTS_MONALISA_NODE)) {
-	$use_monalisa &&= exists $self->{$_} && defined $self->{$_};
-    }
-
-    if ( $use_monalisa )
-    {
-	$monalisa = PHEDEX::Monalisa->new
-	    (
-	     Host    => $self->{FTS_MONALISA_HOST}.':'.$self->{FTS_MONALISA_PORT},
-	     Cluster => $self->{FTS_MONALISA_CLUSTER},
-	     Node    => $self->{FTS_MONALISA_NODE},
-	     apmon   => { sys_monitoring => 0,
-			  general_info   => 0 }
-	     );
-
-	$self->{MONALISA} = $monalisa;
-    }
-
-    my $q_mon = PHEDEX::Transfer::Backend::Monitor->new
-	(
-	 Q_INTERFACE   => $glite,
-	 Q_INTERVAL    => $self->{FTS_Q_INTERVAL},
-	 J_INTERVAL    => $self->{FTS_J_INTERVAL},
-	 POLL_QUEUE    => $self->{FTS_POLL_QUEUE},
-	 APMON         => $monalisa,
-	 ME            => 'QMon',
-	 );
-
-    $self->{FTS_Q_MONITOR} = $q_mon;
-
-    $self->parseFTSmap() if ($self->{FTS_MAPFILE});
+    # Fork off the transfer wrapper
+    $self->addJob(undef, { DETACHED => 1 },
+		  $$self{WRAPPER}, $$job{DIR}, $$self{TIMEOUT},
+		  @{$$self{COMMAND}}, "-copyjobfile=$spec", "-report=$report");
 }
 
-# FTS map parsing
-# The ftsmap file has the following format:
-# SRM.Endpoint="srm://cmssrm.fnal.gov:8443/srm/managerv2" FTS.Endpoint="https://cmsstor20.fnal.gov:8443/glite-data-transfer-fts/services/FileTransfer"
-# SRM.Endpoint="DEFAULT" FTS.Endpoint="https://cmsstor20.fnal.gov:8443/glite-data-transfer-fts/services/FileTransfer"
+# Check whether a job is alive.
+#
+# This periodically checks every FTS copy job for current transfer
+# status, and "reaps" the tasks that have reached FTS "end state".
+#
+# We avoid checking on jobs excessively frequently as the front-end
+# agent calls this routine up to every 15 seconds.  Each copy job
+# maintains a marker file that marks the time we should next poll 
+# the job status.
+#
+# Once an individual file has reached an end state, we create the
+# T<TASKID>X file for the task with all the information about the
+# transfer for that task.  The front-end agent will automatically
+# reap those transfers, and once all transfers for the job have
+# completed, it will automatically clean up the whole copy job.
+#
+# If the check reveals that transfer state has transitioned from 
+# Pending to Active the timeout should be reset to 0, so as to avoid
+# cutting off active transfers while they are onging. This means a 
+# transfer will have an hour to become active, and an hour to complete.
+sub check
+{
+    my ($self, $jobname, $job, $tasks) = @_;
+    my $now = time();
 
-sub parseFTSmap {
-    my $self = shift;
-
-    my $mapfile = $self->{FTS_MAPFILE};
-
-    # hash srmendpoint=>ftsendpoint;
-    my $map = {};
-
-    if (!open MAP, "$mapfile") {	
-	print "FTSmap: Could not open ftsmap file $mapfile\n";
-	return 1;
-    }
-
-    while (<MAP>) {
-	chomp; 
-	s|^\s+||; 
-	next if /^\#/;
-	unless ( /^SRM.Endpoint=\"(.+)\"\s+FTS.Endpoint=\"(.+)\"/ ) {
-	    print "FTSmap: Can not parse ftsmap line:\n$_\n";
-	    next;
-	}
-
-	$map->{$1} = $2;
-    }
-
-    unless (defined $map->{DEFAULT}) {
-	print "FTSmap: Default FTS endpoit is not defined in the ftsmap file $mapfile\n";
-	return 1;
-    }
-
-    $self->{FTS_MAP} = $map;
+    # If we shouldn't yet be checking on this job, bypass it.
+    # The next-check flag is set below once we've checked the
+    # FTS job status and decided the next time we should be
+    # checking on this copy job.
+    return if ((stat("$$job{DIR}/next-check"))[9] >= time();
     
-    return 0;
+    # Check the status of this job.
+    $$self{MASTER}->addJob (... qq{
+      something to call "RunWithTimeout" glite-transfer-status on the job,
+      and to generate a srm-report similar to ftscp generates at the end.
+      you'll basically want to find out which jobs have reached "end"
+      state.}
+      
+      qq{Remember to use LOG_FILE for logging output from this, each
+      time appeneding the output to the existing log file, so transfer
+      log for each task of this job includes the full output of what we
+      did.});
+    
+    # Scan files that have reached end state, and modify the
+    # task status accordingly.  Create "$jobdir/T${task}X"
+    # files as in TransferWrapper, including the transfer
+    # log (logs of all glite-transfer-status calls etc.
+    # for this job so far).
+    
+    &touch("$$job{DIR}/next-check", $now + qq{add time like ftscp does,
+    the tricky thing is to remember how much to add each time around,
+    probably need to keep a small file in $jobdir to indicate how much
+    delay to add so agent stop/start doesn't reset the check interval.});
 }
 
-sub getFTSService {
-    my $self = shift;
-    my $to_pfn = shift;
+# Check if the backend is busy.  FIXME: it's not entirely obvious
+# when the FTS backend is "busy" -- we could always take more work
+# for currently unused FTS channels.  One possibility is to make
+# "startBatch()" detect the channel is full, then actually not take
+# any new files off the queue, and mark $$self{IS_BUSY}=1, and return
+# that here.  Then in "check()" we can set that back to not busy once
+# we've reaped a job.  The dangerous aspects here are 1) getting this
+# to work correctly across agent start/stop, 2) not getting the agent
+# "stuck" under any circumstances (i.e., busy but doing nothing, and
+# thus no way for it to ever become "unstuck").
 
-    my $service;
-
-    my ($endpoint) = ( $to_pfn =~ /(srm.+)\?SFN=/ );
-
-    unless ($endpoint) {
-	print" FTSmap: Could not get the end point from to_pfn $to_pfn\n";
-    }
-
-    if ( exists $self->{FTS_MAP} ) {
-	my $map = $self->{FTS_MAP};
-
-	$service = $map->{ (grep { $_ eq $endpoint } keys %$map)[0] || "DEFAULT" };
-	print "FTSmap: Could not get FTS service endpoint from ftsmap file for file, even default\n" unless $service;
-    }
-
-    #fall back to command line option
-    $service ||= $self->{FTS_SERVICE};
-
-    return $service;
-}
-
-# If $to and $from are not given, then the question is:
-# "Are you too busy to take ANY transfers?"
-# If they are provided, then the question is:
-# "Are you too busy to take transfers on linke $from -> $to?"
+# num_files_in_fts < LINK_FILES - BATCH_FILES
 sub isBusy
 {
-    my ($self, $jobs, $tasks, $to, $from)  = @_;
-    my ($stats, $busy,$valid,%h,$n,$t);
-    $busy = $valid = $t = $n = 0;
-    my $t_valid = 10*60;  # Time until monitoring is considered valid
-
-    # We don't really want to have a maximum limit to the number of
-    # jobs we will submit to FTS, but we need to have something to
-    # prevent uncontrolled submissions at startup or after all
-    # transfers are drained.  Therefore we limit to a maximum number
-    # of jobs equal to twice the maximum number of active files
-    # divided by the files per batch.  This generous amount of jobs
-    # gives us a reasonable limit without too much worry of hitting a
-    # job limit in a prolonged period of high work.
-    my $max_jobs = POSIX::ceil( ($self->{FTS_MAX_ACTIVE} * 2) / $self->{BATCH_FILES} );
-    if (scalar(keys %$jobs) >= $max_jobs) {
-	&logmsg("FTS is busy:  maximum number of jobs ($max_jobs) reached") 
-	    if $self->{VERBOSE};
-	return 1;
-    }
-    
-    if (defined $from && defined $to) {
-	# Check per-link busy status based on a maximum number of
-	# "pending" files per link.  Treat undefined as pending until
-	# their state is resolved.
-	$stats = $self->{FTS_Q_MONITOR}->{LINKSTATS};
-
-	foreach my $file (keys %$stats) {
-	    if (exists $stats->{$file}{$from}{$to}) {
-		$h{ $stats->{$file}{$from}{$to} }++;
-	    }
-	}
-	print "Transfer::FTS::isBusy Link Stats $from->$to\n",
-	Dumper(\%h), "\n" if $self->{DEBUG};
-
-	# Count files in the Ready, Pending or undefined state
-	foreach ( qw / Ready Pending undefined / )
-	{
-	    if ( defined($h{$_}) ) { $n += $h{$_}; }
-	}
-	# Compare to our limit
-	if ( $n >= $self->{FTS_LINK_PEND} ) { 
-	    $busy = 1; 
-	    &logmsg("FTS is busy for link $from->$to:  $n pending\n") if $self->{VERBOSE};
-	}
-      
-	# The state data is only considered valid after a certain amount of time
-	if ( exists($stats->{START}) ) { $t = time - $stats->{START}; }
-	if ( $t > $t_valid ) { $valid = 1; }
-
-	&dbgmsg("Transfer::FTS::isBusy for link $from->$to: busy=$busy valid=$valid") if $self->{DEBUG};
-    } else {
-	# Check total transfer busy status based on maximum number of
-	# "active" files.  This is the maximum amount of parallel
-	# transfer we will allow.  Assume undefined is active until
-	# the state is resolved
-	$stats = $self->{FTS_Q_MONITOR}->WorkStats();
-	if ( $stats &&
-	     exists $stats->{FILES} &&
-	     exists $stats->{FILES}{STATES} )
-	{
-	    # Count the number of all file states
-	    foreach ( values %{$stats->{FILES}{STATES}} ) { $h{$_}++; }
-	}
-      
-	# Count files in the Active state
-	foreach ( qw / Active undefined / )
-	{
-	    if ( defined($h{$_}) ) { $n += $h{$_}; }
-	}
-	# If there are FTS_MAX_ACTIVE files in the Active || undefined state
-	if ( $n >= $self->{FTS_MAX_ACTIVE} ) { 
-	    $busy = 1;
-	    &logmsg("FTS is busy:  maximum active files ($self->{FTS_MAX_ACTIVE}) reached") if $self->{VERBOSE};
-	}
-	
-	# The state data is only considered valid after a certain amount of time
-	if ( exists($stats->{START}) ) { $t = time - $stats->{START}; }
-	if ( $t > $t_valid ) { $valid = 1; }
-	 
-	&dbgmsg("Transfer::FTS::isBusy in total $from->$to: busy=$busy valid=$valid") if $self->{DEBUG};
-    }
-
-    return $busy && $valid ? 1 : 0;
+    my ($self, $jobs, $tasks) = @_;
+    return 0 if ! %$jobs || ! %$tasks;
+    return $$self{IS_BUSY};
 }
 
-
+# Start off a copy job.  Nips off "BATCH_FILES" tasks to go ahead.
 sub startBatch
 {
+    # FIXME: If channel would get filled up, stop taking
+    # transfer tasks from the queue.  Make sure the front-end
+    # agent deals with this situation correctly.
     my ($self, $jobs, $tasks, $dir, $jobname, $list) = @_;
-
-    my @batch = splice(@$list, 0, $self->{BATCH_FILES});
+    my @batch = splice(@$list, 0, $$self{BATCH_FILES});
     my $info = { ID => $jobname, DIR => $dir,
-                 TASKS => { map { $_->{TASKID} => 1 } @batch } };
+	         TASKS => { map { $$_{TASKID} => 1 } @batch } };
     &output("$dir/info", Dumper($info));
     &touch("$dir/live");
-    $jobs->{$jobname} = $info;
-
-    #create the copyjob file via Job->Prepare method
-    my %files = ();
-
-    foreach my $taskid ( keys %{$info->{TASKS}} ) {
-	my $task = $tasks->{$taskid};
-
-	my %args = (
-		    SOURCE=>$task->{FROM_PFN},
-		    DESTINATION=>$task->{TO_PFN},
-		    FROM_NODE=>$task->{FROM_NODE},
-		    TO_NODE=>$task->{TO_NODE},
-		    TASKID=>$taskid,
-		    WORKDIR=>$dir,
-		    START=>&mytimeofday(),
-		    );
-	$files{$task->{TO_PFN}} = PHEDEX::Transfer::Backend::File->new(%args);
-    }
-    
-    my %args = (
-		COPYJOB=>"$dir/copyjob",
-		WORKDIR=>$dir,
-		FILES=>\%files,
-#		SERVICE=>$service,
-		);
-    
-    my $job = PHEDEX::Transfer::Backend::Job->new(%args);
-
-    #this writes out a copyjob file
-    $job->Prepare();
-
-
-    #now get FTS service for the job
-    #we take a first file in the job and determine
-    #the FTS endpoint based on this (using ftsmap file, if given)
-    my $service = $self->getFTSService( $batch[0]->{FROM_PFN} );
-
-    unless ($service) {
-	my $reason = "Cannot identify FTS service endpoint based on a sample source PFN $batch[0]->{FROM_PFN}";
-	print $reason, "\n";
-	$job->Log("$reason\nSee download agent log file details, grep for\ FTSmap to see problems with FTS map file");
-	foreach my $file ( values %files ) {
-	    $file->Reason($reason);
-	    $self->mkTransferSummary($file, $job);
-	}
-    }
-
-    $job->Service($service);
-
-    my $result = $self->{Q_INTERFACE}->Submit($job);
-
-    if ( exists $result->{ERROR} ) { 
-	# something went wrong...
-	my $reason = "Could not submit to FTS\n";
-	$job->Log( $result->{ERROR} );
-	foreach my $file ( values %files ) {
-            $file->Reason($reason);
-            $self->mkTransferSummary($file, $job);
-        }
-
-#	$self->mkTranserSummary();
-	return;
-    }
-
-    my $id = $result->{ID};
-
-    $job->ID($id);
-
-    #register this job with queue monitor.
-    $self->{FTS_Q_MONITOR}->QueueJob($job);
+    $$jobs{$jobname} = $info;
+    $self->clean($info, $tasks);
 }
 
-sub check 
+# Transfer a batch of files.
+sub transferBatch
 {
-}
+    my ($self, $job, $tasks) = @_;
 
-sub setup_callbacks
-{
-  my ($self,$kernel,$session) = @_; #[ OBJECT, KERNEL, SESSION ];
+    # Prepare copyjob and report names.
+    my $spec = "$$job{DIR}/copyjob";
+    my $report = "$$job{DIR}/srm-report";
 
-  if ( $self->{FTS_Q_MONITOR} )
-  {
-    $kernel->state('job_state_change',$self);
-    $kernel->state('file_state_change',$self);
-    my $job_postback  = $session->postback( 'job_state_change'  );
-    my $file_postback = $session->postback( 'file_state_change' );
-    $self->{FTS_Q_MONITOR}->JOB_POSTBACK ( $job_postback );
-    $self->{FTS_Q_MONITOR}->FILE_POSTBACK( $file_postback );
-  }
-}
+    # Now generate copyjob for glite-transfer-submit
+    &output ($spec, join ("", map { "$$tasks{$_}{FROM_PFN} ".
+		                    "$$tasks{$_}{TO_PFN}\n" }
+		          keys %{$$job{TASKS}}));
 
-sub job_state_change
-{
-    my ( $self, $kernel, $arg0, $arg1 ) = @_[ OBJECT, KERNEL, ARG0, ARG1 ];
-#    print "Job-state callback", Dumper $arg0, "\n", Dumper $arg1, "\n";
+    # Parse source and destination host names from the SURLs.
+    # The upstream guarantees every transfer pair in this
+    # batch is for the same source/destination host pair.
+    my $srchost = ...; #FIXME
+    my $desthost = ...; #FIXME
 
-    my $job = $arg1->[0];
-    print "Job-state callback ID ",$job->ID,", STATE ",$job->State,"\n";
-
-    if ($job->ExitStates->{$job->State}) {
-    }else{
-	&touch($job->Workdir."/live");
-    }
-}
-
-sub file_state_change
-{
-  my ( $self, $kernel, $arg0, $arg1 ) = @_[ OBJECT, KERNEL, ARG0, ARG1 ];
-#  print "File-state callback", Dumper $arg0, "\n", Dumper $arg1, "\n"; 
-
-  my $file = $arg1->[0];
-  my $job  = $arg1->[1];
-
-  print "File-state callback TASKID ",$file->TaskID," JOBID ",$job->ID," STATE ",$file->State,' ',$file->Destination,"\n";
-
-  if ($file->ExitStates->{$file->State}) {
-      $self->mkTransferSummary($file,$job);
-  }
-}
-
-sub mkTransferSummary {
-    my $self = shift;
-    my $file = shift;
-    my $job = shift;
-
-    #by now we report 0 for 'Finished' and 1 for Failed or Canceled
-    #where would we do intelligent error processing 
-    #and report differrent erorr codes for different errors?
-    my $status = $file->ExitStates->{$file->State};
-
-    $status = ($status == 1)?0:1;
+    # Use FTSSelectChannel / static text file to select channels
+    # applicable to this host pair.  If the latter, simply generate
+    # a static text file per allowed source host, and complain
+    # loudly if there is no such file for the source host.  I.e.,
+    # make the agent take an option with a directory name, and
+    # look for the channel selections in there by source host
+    # name?
+    my $ftsserver = ...; # FIXME: from channel select output
+    # FIXME: Print into logging information in verbose mode:
+    #  "Using channel X from server Y for transfer pair A, B;
+    #   channel parameters were..., previously seen quality ..."
     
-    my $log = join("", $file->Log,
-		   "-" x 10 . " RAWOUTPUT " . "-" x 10 . "\n",
-		   $job->RawOutput);
-
-    my $summary = {START=>$file->Start,
-		   END=>&mytimeofday(), 
-		   LOG=>$log,
-		   STATUS=>$status,
-		   DETAIL=>$file->Reason || "", 
-		   DURATION=>$file->Duration || 0
-		   };
+    # Call glite-transfer-submit, save the output GUID into
+    # a file in copyjob directory and (error) output into a log file.
+    # FIXME
     
-    #make a done file
-    &output($job->Workdir."/T".$file->{TASKID}."X", Dumper $summary);
-
-    print "mkTransferSummary done for task: ",$job->Workdir,' ',$file->TaskID,"\n";
+    # Mark the next time we should be checking on this job.
+    &touch("$$job{DIR}/next-check", time() + 60);  # FIXME: save some indication how to increase this in check()?
+    
+    # FIXME: copy some meta-state state information initialisation
+    # (transfer start, end time, etc.) from TransferWrapper.
 }
+
 
 1;
