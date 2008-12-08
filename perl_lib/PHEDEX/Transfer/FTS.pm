@@ -50,6 +50,7 @@ sub new
     $options->{'service=s'}            = \$params->{FTS_SERVICE};
     $options->{'myproxy=s'}            = \$params->{FTS_MYPROXY};
     $options->{'passfile=s'}           = \$params->{FTS_PASSFILE};
+    $options->{'spacetoken=s'}         = \$params->{FTS_SPACETOKEN};
     $options->{'priority=s'}           = \$params->{FTS_PRIORITY};
     $options->{'mapfile=s'}            = \$params->{FTS_MAPFILE};
     $options->{'q_interval=i'}         = \$params->{FTS_Q_INTERVAL};
@@ -94,6 +95,7 @@ sub init
 	 );
 
     $glite->MYPROXY($self->{FTS_MYPROXY}) if $self->{FTS_MYPROXY};
+    $glite->SPACETOKEN($self->{FTS_SPACETOKEN}) if $self->{FTS_SPACETOKEN};
 
     if ($self->{FTS_PASSFILE}) {
 	my $passfile = $self->{FTS_PASSFILE};
