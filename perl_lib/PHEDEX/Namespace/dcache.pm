@@ -4,7 +4,6 @@ use warnings;
 no strict 'refs';
 use base 'PHEDEX::Namespace::Common'; # All interface packages must do this
 use PHEDEX::Core::Loader;
-use Data::Dumper;
 use Getopt::Long;
 
 sub new
@@ -20,15 +19,12 @@ sub new
   %params = (
 		VERBOSE => 0,
 		DEBUG   => 0,
-                CACHE   => undef,
-                NOCACHE => 0,
 		PRELOAD	=> '',
             );
   %options = (
 		'help'		=> \$help,
 		'verbose!'	=> \$params{VERBOSE},
 		'debug+'	=> \$params{DEBUG},
-                'nocache'       => \$params{NOCACHE},
 		'preload=s'	=> \$params{PRELOAD},
              );
   GetOptions(%options);
@@ -42,7 +38,6 @@ sub new
 # passed a reference to this object when they are loaded/created, so they
 # can pick out the parameters you define above.
   $self->SUPER::_init_commands;
-  print Dumper($self) if $self->{DEBUG};
   $self->Help if $help;
   return $self;
 }
@@ -56,11 +51,10 @@ sub Help
   print <<EOF;
 
  This module takes the standard options:
- --nocache  to disable the caching mechanism
  --help, --(no)debug, --(no)verbose
 
  also:
- --preload  value to set in LD_PRELOAD in the environment before executing
+ --preload value to set in LD_PRELOAD in the environment before executing
  any client commands
 
  Commands known to this module:
