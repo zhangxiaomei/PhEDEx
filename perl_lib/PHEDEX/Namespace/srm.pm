@@ -1,5 +1,11 @@
 package PHEDEX::Namespace::srm;
 
+=head1 NAME
+
+PHEDEX::Namespace::srm - implement namespace framework for srm protocol
+
+=cut
+
 use strict;
 use warnings;
 no strict 'refs';
@@ -43,8 +49,8 @@ sub new
   $self->{ENV} = '';
 
   $self->SUPER::_init_commands;
-  $self->proxy_check if $self->{DEBUG};
   print Dumper($self) if $self->{DEBUG};
+  $self->proxy_check if $self->{DEBUG};
   $self->Help if $help;
   return $self;
 }
@@ -67,10 +73,10 @@ sub Help
  --help, --debug, --(no)verbose
 
  as well as these:
- --nocache      to disable the caching mechanism
- --version      specifies the protocol version. Default='$default_protocol_version'
+ --nocache to disable the caching mechanism
+ --version specifies the protocol version. Default='$default_protocol_version'
  --proxy_margin require a proxy to be valid for at least this long or die.
-	        Default=$default_proxy_margin
+	Default=$default_proxy_margin
 
  Commands known to this module:
 EOF

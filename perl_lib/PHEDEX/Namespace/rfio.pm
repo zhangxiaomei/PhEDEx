@@ -1,5 +1,11 @@
 package PHEDEX::Namespace::rfio;
 
+=head1 NAME
+
+PHEDEX::Namespace::rfio - implement namespace framework for rfio protocol
+
+=cut
+
 use strict;
 use warnings;
 no strict 'refs';
@@ -51,14 +57,6 @@ sub Help
 
  This module takes the standard options:
  --help, --debug, --(no)verbose
-
- as well as these:
- --nocache            to disable the caching mechanism
- --rfio_use_castor_v2 to specify their counterparts in the environment. The default is set to 'YES'
-
- Commands known to this module:
-
-
 
  Commands known to this module:
 EOF
