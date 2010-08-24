@@ -184,6 +184,14 @@ sub validateRequest
     my $type = $h{TYPE};
     my $client = $h{CLIENT_ID};
     
+    if ($type eq 'xfer' && $h{TIME_START} && $h{IS_MOVE} eq 'y') {
+	die "Time-based move requests are not allowed\n";
+    }
+    
+    if ($type eq 'delete' && $h{TIME_START}) {
+	die "Time-based deletion requests are not allowed\n";
+    }
+
     # Part I:  validate data
     my $dataformat = $data->{FORMAT};
     my $expand_datasets = $type eq 'xfer' && $h{IS_STATIC} eq 'y' ? 1 : 0;
@@ -261,7 +269,11 @@ sub validateRequest
     } else {
 	die "request has an unknown data structure\n";
     }
-
+    # Time-based request validation: only dataset-level items are allowed
+    if (@$b_ids && $h{TIME_START}) {
+	die "cannot request time-based transfer: not allowed for block-level or static dataset-level requests\n"; 
+    }
+    
     # Part II:  validate nodes
     # Request policy details here:
     #  * Moves may only be done to a T1 MSS node
@@ -389,14 +401,14 @@ sub createRequest
     if ($type eq 'xfer') {
 	my $sql = qq{ insert into t_req_xfer
 			  (request, priority, is_custodial, is_move, is_static,
-			   is_transient, is_distributed, user_group, data)
+			   is_transient, is_distributed, user_group, time_start, data)
 			  values
 			  (:request, :priority, :is_custodial, :is_move, :is_static,
-			   :is_transient, :is_distributed, :user_group, :data) };
+			   :is_transient, :is_distributed, :user_group, :time_start, :data) };
 	my %binds;
 	$binds{':request'} = $rid;
 	$binds{lc ":$_"} = $h{$_} foreach qw(PRIORITY IS_CUSTODIAL IS_MOVE IS_STATIC
-					     IS_TRANSIENT IS_DISTRIBUTED DATA);
+					     IS_TRANSIENT IS_DISTRIBUTED TIME_START DATA);
 	if (defined $h{USER_GROUP}) {
 	    my %groupmap = reverse %{ &getGroupMap($self) };
 	    my $group_id = $groupmap{ $h{USER_GROUP} };
