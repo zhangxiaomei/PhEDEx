@@ -21,7 +21,6 @@
     <span id='phedex-banner-messages-outer' class='phedex-messages-outer'>
       <span id='phedex-banner-messages-inner' class='phedex-messages-inner'>Loading, please be patient...</span>
     </span>
-    <div id='phedex-controls' class='phedex-controls float-right'></div>
  </div>
  <div id='phedex-main'></div>
 
@@ -30,7 +29,6 @@
 <script type="text/javascript">
  PxW.ProductionMode = false;
  PxW.combineRequests = false;
-// PxW.GlobalOptions = { window:true, resizeable:true };
 </script>
 <script type="text/javascript" src="/phedex/datasvc/app/js/phedex-loader.js"></script>
 <script type="text/javascript">
@@ -38,43 +36,44 @@
 // When the DOM is available, start loading the essential bits and pieces
 YAHOO.util.Event.onDOMReady( runDemo );
 function runDemo() {
-  log('initialising','info','app');
   PxL  = new PHEDEX.Loader();
   banner('Loading core application...');
-  PxL.load(createCoreApp,'core','sandbox','datasvc');
+  PxL.load(createCoreApp,'datasvc');
 }
 
 function createCoreApp() {
-// This is called once the core is fully loaded. Now I can create the core application and sandbox, and then start creating PhEDEx modules
-  banner('Create sandbox and core application...');
-  try {
-    PxS = new PHEDEX.Sandbox();
-  } catch(ex) { log(ex,'error',name); banner('Error creating sandbox!','error'); return; }
-  try {
-    PxC = new PHEDEX.Core(PxS,PxL);
-    PxC.create();
-  } catch(ex) { log(ex,'error',name); banner('Error creating Core application!','error'); return; }
+// This is called once the core is fully loaded. Now I can call the dataservice...
 
-  banner('Core application is running, ready to create PhEDEx data-modules...');
-  PHEDEX.Util.bannerIdleTimer(PxL);
+// define the arguments. An object with an 'api' member and an 'args' member that passes any optional arguments.
+  var args = { api:'nosuchapi', args:{node:'T2_MV_Maldives'} };
 
-// For now, you need this magic to pass an argument to the LinkView module. We create a listener function that listens for
-// ('module','needArguments'), and then explicitly sends an arguments-object with the name of a node.
-  var moduleHandler = function(ev,arr) {
-     var action = arr[0],
-         id     = arr[1];
-    switch ( action ) {
-      case 'needArguments':{ // respond only to ('module','needArguments')
-        PxS.notify( id, 'doSetArgs', {node:'T0_CH_CERN_Export'} );
-        break;
+// Prepare the callback...
+// this example simply dumps the object returned by the call, with minimal parsing to show how to get started
+// except, if the 'response' is set, this means there was an error! Deal with that first
+  var dataCallback = function(data,context,response) {
+    PHEDEX.Datasvc.throwIfError(data,response); // if there was an HTTP error, this will throw an error, and not return.
+    banner('Data-service returned OK...')
+
+// N.B. Use the try/catch to protect against failed calls, since the same callback is used for success or failure.
+    try {
+      var el = document.getElementById('phedex-main');
+      el.innerHTML = "";
+
+// data.node holds the actual response from the API, so loop over that
+      for (var i in data.node) {
+        el.innerHTML += '<br/>'+i+': '+YAHOO.lang.dump(data.node[i],2);
       }
-    };
-  }
-// tell the sandbox we are listening for 'module' events
-  PxS.listen('module', moduleHandler);
+    } catch(ex) {
+      banner('Error processing data','error');
+    }
+  };
 
-// This is all it takes to get the core to load, create, and render the 'agents' module from PhEDEx.
-  PxS.notify('CreateModule','agents');
+// add the callback to the argument-object
+  args.callback = dataCallback;
+
+// ...and call the dataservice!
+  banner('Connecting to data-service...');
+  PHEDEX.Datasvc.Call( args );
 };
 </script>
 </body>
