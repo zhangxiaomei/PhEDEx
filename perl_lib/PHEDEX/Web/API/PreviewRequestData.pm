@@ -1,10 +1,10 @@
 package PHEDEX::Web::API::PreviewRequestData;
-use warnings;
-use strict;
 use PHEDEX::Web::Util;
 use PHEDEX::Web::SQL;
 use PHEDEX::RequestAllocator::Core;
 use PHEDEX::Core::Util;
+use warnings;
+use strict;
 use Data::Dumper;
 
 =pod
@@ -60,7 +60,7 @@ sub previewrequestdata {
           $warn = 1;
         }
         if ($$res{DBS} ne $params{dbs})  {
-          push @comments, 'Wrong DBS ("' . $res->{DBS} . '")';
+          push @comments, 'Wrong DBS';
           $warn = 1; $row_problem = 1;
         }
         if ($$userdupes{$$res{LEVEL}}{$$res{ID}}) {
@@ -197,22 +197,15 @@ sub resolve_data
 	$$resolved{$userglob} ||= [];
 
 	$level = ($userglob =~ m/\#/ ? 'BLOCK' : 'DATASET');
+	$has{$level}++;
 
 	my $re = $userglob;
 	$re =~ s:\*+:[^/\#]+:g;                              # simple glob to regex, only * is supported
-	my $like = $userglob;
-	$like =~ s:\*+:%:g;                                  # glob to sql like, only * is supported
-	if ( $static && $level eq 'DATASET' ) {              # turn dataset match into block match if static
-	  $re .= '#[^/\#]+';
-          $level = 'BLOCK';
-          if ( $like !~ m/#/ ) {
-            $like .= '#%';
-          }
-        }
-	$has{$level}++;
-
+	$re .= '#[^/\#]+' if $static && $level eq 'DATASET'; # turn dataset match into block match if static
 	$userglob_re{$userglob} = qr/^$re$/;                 # compile regexp
 
+	my $like = $userglob;
+	$like =~ s:\*+:%:g;                                  # glob to sql like, only * is supported
 	push @{$userglob_like{$level}}, $like;
     }
 
