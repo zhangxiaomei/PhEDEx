@@ -31,6 +31,8 @@ our %params =
 
 	  PARANOID	=> 1,
 	  ME	 	=> __PACKAGE__ . '/' . $VERSION,
+
+	  CLEAN_ENVIRONMENT	=> 1,
 	);
 
 sub new
@@ -78,7 +80,7 @@ sub init
 {
   my $self = shift;
 
-  if ( $self->{NOCERT} )
+  if ( $self->{CLEAN_ENVIRONMENT} || $self->{NOCERT} )
   {
     foreach ( map { "HTTPS_$_" } @env_keys ) { delete $ENV{$_} if $ENV{$_}; }
   }
@@ -113,8 +115,7 @@ sub test_certificate
   $response = $self->get($url);
   if ( !$self->response_ok($response) )
   {
-    print "Bad response from server: ",$response->status_line,"\n";
-    print "Server response: ",$response->content(),"\n";
+    print "Bad response from server: ",$response->content(),"\n";
     return;
   }
 
@@ -164,24 +165,6 @@ sub path_info
   my $self = shift;
   return $self->{TARGET} if $self->{TARGET};
   return '/' . join('/',$self->{FORMAT},$self->{INSTANCE},$self->{CALL});
-}
-
-sub get
-{
-  my ($self,$url,$h,$headers) = @_;
-  my $args='';
-  no strict 'vars';
-  foreach my $key ( keys %{$h} )
-  {
-    if ( $args ) { $args .= '&'; }
-    if ( ref($h->{$key}) eq 'ARRAY' ) {
-      $args .= join( '&', map { "$key=" . ( $_ || '') } @{$h->{$key}} );
-    } else {
-      $args .= $key . '=' . ( $h->{$key} || '');
-    }
-  }
-  if ( $args ) { $url .= '?' . $args; }
-  my $response = $self->SUPER::get($url,%{$headers});
 }
 
 1;
